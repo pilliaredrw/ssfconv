@@ -735,14 +735,40 @@ def ssf2fcitx5(skin_dir):
         def optionxform(self, optionstr):
             return optionstr
     
-    # 读取 skin.ini 文件
-    try:
-        ssf = CaseSensitiveConfigParser(allow_no_value = True)
-        ssf.read(skin_ini, encoding = 'utf-16')
-    except:
-        sys.stderr.write('读取 skin.ini 失败\n')
-        return 2
+    # # 读取 skin.ini 文件
+    # try:
+    #     ssf = CaseSensitiveConfigParser(allow_no_value = True)
+    #     ssf.read(skin_ini, encoding = 'utf-16')
+    # except:
+    #     sys.stderr.write('读取 skin.ini 失败\n')
+    #     return 2
+
+
+    encodings_to_try = ['utf-16', 'gb18030', 'utf-8']
+    ssf = CaseSensitiveConfigParser(allow_no_value = True)
+    read_success = False
     
+    for enc in encodings_to_try:
+        try:
+            # 每次尝试前必须重置 parser，否则可能会残留上次读取失败的垃圾数据
+            ssf = CaseSensitiveConfigParser(allow_no_value = True)
+            ssf.read(skin_ini, encoding = enc)
+            
+            # 简单验证：如果读到了 'General' 节，说明编码大概率是对的
+            if 'General' in ssf:
+                read_success = True
+                # print(f"DEBUG: 成功使用 {enc} 编码读取 {skin_dir}") # 调试用
+                break
+        except UnicodeError:
+            continue # 编码不对，试下一个
+        except Exception:
+            continue # 其他错误，试下一个
+
+    if not read_success:
+        sys.stderr.write(f'读取 skin.ini 失败 (尝试了: {encodings_to_try})\n')
+        return 2
+
+
     # 建立 conf 的对象
     skin = CaseSensitiveConfigParser(allow_no_value = True)
     
