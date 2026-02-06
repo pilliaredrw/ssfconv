@@ -74,14 +74,12 @@ def extractSsf(ssf_file_path, dest_dir):
 
 def getImageAvg(image_path, area = (0, 0, 0, 0)):
     """
-        获取图片的像素平均值
-            image_path 图片的路径
-            aria 是需要求的平均值的区域，默认整幅图
-                格式 area = (x1,x2,y1,y2)
-                当 x2 或 y2 为零表示最大值直到边界
-                            为负时表示距离最大边界多少的坐标
-        返回 (r,g,b) 三元组
+    [修复版] 获取图片的像素平均值
+    修复了 uint8 溢出问题，并增加了对不存在图片的容错处理
     """
+    if not os.path.exists(image_path):
+        return (0, 0, 0) # 如果图片不存在，返回黑色，防止报错
+
     # 读取到图片
     image = Image.open(image_path)
     size = image.size
@@ -98,43 +96,54 @@ def getImageAvg(image_path, area = (0, 0, 0, 0)):
         t = x1; x1 = x2; x2 = t
     if y1 > y2:
         t = y1; y1 = y2; y2 = t
+    
+    # 边界修正
     if x1 == x2:
-        if x2 != size[0]:
-            x2 += 1
-        else:
-            x1 -= 1
+        if x2 != size[0]: x2 += 1
+        else: x1 -= 1
     if y1 == y2:
-        if y2 != size[1]:
-            y2 += 1
-        else:
-            y1 -= 1
+        if y2 != size[1]: y2 += 1
+        else: y1 -= 1
     
     # 算出区域内所有象素点的平均值
     a = np.asarray(image)
     r = g = b = 0
     count = 0
-    if a.shape[2] == 4:
+    
+    # ---------------------------------------------------------
+    # 核心修复区域：将像素值强制转换为 int() 以防止 uint8 溢出
+    # ---------------------------------------------------------
+    if len(a.shape) == 3 and a.shape[2] == 4: # RGBA 格式
         for y in range(y1, y2):
             for x in range(x1, x2):
+                # 只有 alpha通道 > 0 (不透明) 才计算
                 if a[y][x][3] > 0:
-                    r += a[y][x][0]
-                    g += a[y][x][1]
-                    b += a[y][x][2]
+                    r += int(a[y][x][0])  # <--- 加上 int()
+                    g += int(a[y][x][1])  # <--- 加上 int()
+                    b += int(a[y][x][2])  # <--- 加上 int()
                     count += 1
-    else:
+    elif len(a.shape) == 3: # RGB 格式
         for y in range(y1, y2):
             for x in range(x1, x2):
-                r += a[y][x][0]
-                g += a[y][x][1]
-                b += a[y][x][2]
+                r += int(a[y][x][0])      # <--- 加上 int()
+                g += int(a[y][x][1])      # <--- 加上 int()
+                b += int(a[y][x][2])      # <--- 加上 int()
                 count += 1
+    else:
+        # 处理灰度图或其他奇怪格式，直接返回默认
+        return (0,0,0)
+
     if count == 0:
         count = 1
+        
     r //= count
     g //= count
     b //= count
     return (r, g, b)
-    
+
+
+
+
 def rgbDist(c1, c2):
     """
         简单的计算两个颜色之间的距离
@@ -737,22 +746,30 @@ def ssf2fcitx5(skin_dir):
     # 建立 conf 的对象
     skin = CaseSensitiveConfigParser(allow_no_value = True)
     
+# --- [修复开始] 增加容错处理 ---
+    # 定义一个内部辅助函数，防止 key 不存在报错
+    def get_val(section, key, default=''):
+        if section in ssf and key in ssf[section]:
+            return ssf[section][key]
+        return default
+
     skin['Metadata'] = {
-        # 皮肤名称
-        'Name': ssf['General']['skin_name'],
+        # 皮肤名称 (如果没有名字，就叫 Unknown)
+        'Name': get_val('General', 'skin_name', 'Unknown'),
         
         # 皮肤版本
-        'Version': ssf['General']['skin_version'],
+        'Version': get_val('General', 'skin_version', '1.0'),
         
         # 皮肤作者
-        'Author': ssf['General']['skin_author'],
+        'Author': get_val('General', 'skin_author', 'Unknown'),
         
-        # 描述
-        'Description': ssf['General']['skin_info'],
+        # 描述 (报错就是因为缺这个，现在缺了就填空)
+        'Description': get_val('General', 'skin_info', ''),
 
         # 用 DPI 缩放
         'ScaleWithDPI': 'False',
     }
+    # --- [修复结束] ---
     
     # 将 skin.ini 的颜色转换成 (r,g,b) 三元组
     def colorConv(ssf_color):
