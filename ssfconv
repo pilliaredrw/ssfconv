@@ -735,37 +735,35 @@ def ssf2fcitx5(skin_dir):
         def optionxform(self, optionstr):
             return optionstr
     
-    # # 读取 skin.ini 文件
-    # try:
-    #     ssf = CaseSensitiveConfigParser(allow_no_value = True)
-    #     ssf.read(skin_ini, encoding = 'utf-16')
-    # except:
-    #     sys.stderr.write('读取 skin.ini 失败\n')
-    #     return 2
-
-
-    encodings_to_try = ['utf-16', 'gb18030', 'utf-8']
-    ssf = CaseSensitiveConfigParser(allow_no_value = True)
-    read_success = False
+# 1. 增加 'gbk' (gb18030 的别名，有时 Python 对二者处理略有不同)
+    encodings_to_try = ['utf-16', 'gb18030', 'utf-8', 'gbk', 'big5']
     
+    read_success = False
+    last_error = None # 用来记录最后一次报错的原因
+
     for enc in encodings_to_try:
         try:
-            # 每次尝试前必须重置 parser，否则可能会残留上次读取失败的垃圾数据
-            ssf = CaseSensitiveConfigParser(allow_no_value = True)
-            ssf.read(skin_ini, encoding = enc)
+            # 关键修改：strict=False (允许重复键值对，容忍旧版烂语法)
+            ssf = CaseSensitiveConfigParser(allow_no_value=True, strict=False)
+            ssf.read(skin_ini, encoding=enc)
             
-            # 简单验证：如果读到了 'General' 节，说明编码大概率是对的
+            # 简单验证：只要能读出 'General' 节，就认为成功
             if 'General' in ssf:
                 read_success = True
-                # print(f"DEBUG: 成功使用 {enc} 编码读取 {skin_dir}") # 调试用
                 break
-        except UnicodeError:
-            continue # 编码不对，试下一个
-        except Exception:
-            continue # 其他错误，试下一个
+        except UnicodeError as e:
+            last_error = f"编码错误 ({enc}): {e}"
+            continue 
+        except Exception as e:
+            # 这里捕获的一定是语法错误 (DuplicateOption, MissingSectionHeader 等)
+            last_error = f"语法解析错误 ({enc}): {e}"
+            # 依然尝试下一种编码，万一是编码导致的乱码看起来像语法错误呢？
+            continue
 
     if not read_success:
-        sys.stderr.write(f'读取 skin.ini 失败 (尝试了: {encodings_to_try})\n')
+        # 打印出最后的死因，方便调试
+        sys.stderr.write(f'读取 skin.ini 失败! 文件: {skin_ini}\n')
+        sys.stderr.write(f'最后一次报错详情: {last_error}\n')
         return 2
 
 
